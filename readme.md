@@ -103,8 +103,8 @@ curl -X 'POST' \
   'http://localhost:8000/sessions/create' \
   -H 'Content-Type: application/json' \
   -d '{
-    "creator_name": "sarah",
-    "partner_name": "gavin"
+    "creator_name": "person1",
+    "partner_name": "person2"
 }'
 ```
 
@@ -114,7 +114,7 @@ curl -X 'POST' \
   'http://localhost:8000/sessions/join/{invite_code}' \
   -H 'Content-Type: application/json' \
   -d '{
-    "participant_name": "gavin"
+    "participant_name": "person2"
 }'
 ```
 
@@ -125,7 +125,7 @@ curl -X 'POST' \
   -H 'Content-Type: application/json' \
   -d '{
     "content": "I feel overwhelmed because I need more emotional support",
-    "sender_name": "sarah"
+    "sender_name": "person1"
 }'
 ```
 
