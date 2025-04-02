@@ -4,33 +4,17 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 import uuid
-
+from app.models import SessionCreate, Message, Session
+from app.mediator import AIMediator, OllamaMediatorModel
 app = FastAPI(title="Duke API")
 
 # MongoDB connection
 client = AsyncIOMotorClient("mongodb://localhost:27017")
 db = client.duke_db
 
+# Initialize AI mediator
+mediator = AIMediator(OllamaMediatorModel())
 
-# Pydantic models for data validation
-class SessionCreate(BaseModel):
-    creator_name: str
-    partner_name: str
-
-
-class Message(BaseModel):
-    content: str
-    sender_name: str
-
-
-class Session(BaseModel):
-    id: str
-    invite_code: str
-    creator_name: str
-    partner_name: str
-    status: str  # "waiting", "active", "completed"
-    current_turn: str
-    created_at: datetime
 
 
 # Session routes
@@ -95,14 +79,37 @@ async def send_message(session_id: str, message: Message):
     if session["current_turn"] != message.sender_name:
         raise HTTPException(status_code=400, detail="Not your turn to speak")
 
-    # Store the message
+    # Store the user message
     msg = {
         "session_id": session_id,
         "content": message.content,
         "sender_name": message.sender_name,
+        "type": "user",
         "timestamp": datetime.utcnow()
     }
     await db.messages.insert_one(msg)
+
+    # Get the last two messages (will include the one we just stored)
+    recent_messages = await db.messages.find(
+        {"session_id": session_id, "type": "user"}
+    ).sort("timestamp", -1).limit(2).to_list(None)
+
+    # If we have both perspectives (2 messages), get Duke's mediation
+    if len(recent_messages) == 2:
+        try:
+            # Get and store AI response
+            ai_response = await mediator.mediate(session_id, msg, db)
+            ai_msg = {
+                "session_id": session_id,
+                "content": ai_response,
+                "sender_name": "Duke",
+                "type": "ai",
+                "timestamp": datetime.utcnow()
+            }
+            await db.messages.insert_one(ai_msg)
+        except Exception as e:
+            print(f"AI mediation error: {str(e)}")
+            raise HTTPException(status_code=500, detail="AI mediation failed")
 
     # Update turn to other participant
     next_turn = (
@@ -116,10 +123,19 @@ async def send_message(session_id: str, message: Message):
         {"$set": {"current_turn": next_turn}}
     )
 
-    return {
-        "message": "Message sent",
-        "next_turn": next_turn
-    }
+    # Return relevant information based on whether Duke mediated
+    if len(recent_messages) == 2:
+        return {
+            "message": "Both perspectives shared, Duke has responded",
+            "next_turn": next_turn,
+            "mediation": True
+        }
+    else:
+        return {
+            "message": "Message sent, waiting for partner's perspective",
+            "next_turn": next_turn,
+            "mediation": False
+        }
 
 
 @app.get("/sessions/{session_id}")
